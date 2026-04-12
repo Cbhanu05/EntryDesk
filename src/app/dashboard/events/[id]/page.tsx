@@ -1,0 +1,280 @@
+import { requireRole } from '@/lib/auth/require-role'
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Users, UserCheck, Shield, Swords, Medal, Building2, AlertCircle, XCircle, Settings } from "lucide-react"
+import Link from 'next/link'
+
+export default async function EventOverviewPage({ params }: { params: { id: string } }) {
+    const { id } = await params
+    const { supabase } = await requireRole(['organizer', 'admin'], { redirectTo: '/dashboard' })
+
+    // Fetch all valid entries (no drafts) from the view for analysis
+    const { data: entries } = await supabase
+        .from('organizer_entries_view')
+        .select('*')
+        .eq('event_id', id)
+        .neq('status', 'draft')
+
+    // Fetch pending coach applications
+    const { count: pendingApprovals } = await supabase
+        .from('event_applications')
+        .select('*', { count: 'exact', head: true })
+        .eq('event_id', id)
+        .eq('status', 'pending')
+
+    // Fetch approved coach applications (approved to participate)
+    const { count: approvedCoaches } = await supabase
+        .from('event_applications')
+        .select('*', { count: 'exact', head: true })
+        .eq('event_id', id)
+        .eq('status', 'approved')
+
+    // Compute Stats
+    const totalEntries = entries?.length || 0
+
+    const statusStats = {
+        approved: entries?.filter(e => e.status === 'approved').length || 0,
+        submitted: entries?.filter(e => e.status === 'submitted').length || 0,
+        rejected: entries?.filter(e => e.status === 'rejected').length || 0,
+    }
+
+    const submittedCoachesMap = new Map<string, string>()
+    entries
+        ?.filter(e => e.status === 'submitted')
+        .forEach((e: any) => {
+            const coachId = e.coach_id as string | undefined
+            const email = (e.coach_email as string | undefined) || ''
+            const name = (e.coach_name as string | undefined) || email.split('@')?.[0] || email || '—'
+            if (coachId && !submittedCoachesMap.has(coachId)) submittedCoachesMap.set(coachId, name)
+        })
+    const submittedCoachNames = Array.from(submittedCoachesMap.values())
+    const submittedCoachPreview = submittedCoachNames.slice(0, 3)
+    const submittedCoachMore = submittedCoachNames.length - submittedCoachPreview.length
+    const submittedCoachSummary =
+        submittedCoachPreview.length > 0
+            ? `Coaches: ${submittedCoachPreview.join(', ')}${submittedCoachMore > 0 ? ` +${submittedCoachMore} more` : ''}`
+            : 'No submissions yet'
+
+    const typeStats = {
+        kata: entries?.filter(e => e.participation_type === 'kata').length || 0,
+        kumite: entries?.filter(e => e.participation_type === 'kumite').length || 0,
+        both: entries?.filter(e => e.participation_type === 'both').length || 0,
+    }
+
+    const genderStats = {
+        male: entries?.filter(e => e.student_gender === 'male').length || 0,
+        female: entries?.filter(e => e.student_gender === 'female').length || 0,
+    }
+    const femalePct = totalEntries ? (genderStats.female / totalEntries) * 100 : 0
+    const malePct = totalEntries ? (genderStats.male / totalEntries) * 100 : 0
+
+    // Top Dojos
+    const dojoCounts: Record<string, number> = {}
+    entries?.forEach(e => {
+        const name = e.dojo_name || 'Unknown'
+        dojoCounts[name] = (dojoCounts[name] || 0) + 1
+    })
+
+    const topDojos = Object.entries(dojoCounts)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 5)
+
+    const distinctDojosCount = Object.keys(dojoCounts).length
+
+    return (
+        <div className="space-y-6">
+            {/* Top-level Key Metrics */}
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
+                <Link href={`/dashboard/events/${id}/entries`} className="group block h-full focus:outline-none">
+                    <Card className="h-full cursor-pointer border border-black/10 bg-gradient-to-b from-background/90 to-background/50 shadow-md shadow-black/5 transition-all group-hover:-translate-y-1 group-hover:bg-background/70 group-hover:shadow-lg group-hover:shadow-black/10 dark:border-white/10 dark:shadow-black/40">
+                        <CardHeader className="flex min-h-[52px] flex-row items-start justify-between gap-2 space-y-0 pb-2">
+                            <CardTitle className="min-w-0 whitespace-normal text-sm font-medium leading-snug">Total Entries</CardTitle>
+                            <Users className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold">{totalEntries}</div>
+                            <p className="text-xs text-muted-foreground">Across {distinctDojosCount} dojos</p>
+                        </CardContent>
+                    </Card>
+                </Link>
+
+                <Link href={`/dashboard/events/${id}/approvals?status=pending`} className="group block h-full focus:outline-none">
+                    <Card className="h-full cursor-pointer border border-black/10 bg-gradient-to-b from-background/90 to-background/50 shadow-md shadow-black/5 transition-all group-hover:-translate-y-1 group-hover:bg-background/70 group-hover:shadow-lg group-hover:shadow-black/10 dark:border-white/10 dark:shadow-black/40">
+                        <CardHeader className="flex min-h-[52px] flex-row items-start justify-between gap-2 space-y-0 pb-2">
+                            <CardTitle className="min-w-0 whitespace-normal text-sm font-medium leading-snug">Pending Approvals</CardTitle>
+                            <UserCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold text-amber-500">{pendingApprovals || 0}</div>
+                            <p className="text-xs text-muted-foreground">Coach requests</p>
+                        </CardContent>
+                    </Card>
+                </Link>
+
+                <Link href={`/dashboard/events/${id}/approvals?status=approved`} className="group block h-full focus:outline-none">
+                    <Card className="h-full cursor-pointer border border-black/10 bg-gradient-to-b from-background/90 to-background/50 shadow-md shadow-black/5 transition-all group-hover:-translate-y-1 group-hover:bg-background/70 group-hover:shadow-lg group-hover:shadow-black/10 dark:border-white/10 dark:shadow-black/40">
+                        <CardHeader className="flex min-h-[52px] flex-row items-start justify-between gap-2 space-y-0 pb-2">
+                            <CardTitle className="min-w-0 whitespace-normal text-sm font-medium leading-snug">Approved Coaches</CardTitle>
+                            <Shield className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold text-emerald-600">{approvedCoaches || 0}</div>
+                            <p className="text-xs text-muted-foreground">Cleared to enter</p>
+                        </CardContent>
+                    </Card>
+                </Link>
+
+                <Link href={`/dashboard/events/${id}/entries?status=approved`} className="group block h-full focus:outline-none">
+                    <Card className="h-full cursor-pointer border border-black/10 bg-gradient-to-b from-background/90 to-background/50 shadow-md shadow-black/5 transition-all group-hover:-translate-y-1 group-hover:bg-background/70 group-hover:shadow-lg group-hover:shadow-black/10 dark:border-white/10 dark:shadow-black/40">
+                        <CardHeader className="flex min-h-[52px] flex-row items-start justify-between gap-2 space-y-0 pb-2">
+                            <CardTitle className="min-w-0 whitespace-normal text-sm font-medium leading-snug">Approved Entries</CardTitle>
+                            <Medal className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold text-emerald-600">{statusStats.approved}</div>
+                            <p className="text-xs text-muted-foreground">Ready for event</p>
+                        </CardContent>
+                    </Card>
+                </Link>
+
+                <Link href={`/dashboard/events/${id}/entries?status=submitted`} className="group block h-full focus:outline-none">
+                    <Card className="h-full cursor-pointer border border-black/10 bg-gradient-to-b from-background/90 to-background/50 shadow-md shadow-black/5 transition-all group-hover:-translate-y-1 group-hover:bg-background/70 group-hover:shadow-lg group-hover:shadow-black/10 dark:border-white/10 dark:shadow-black/40">
+                        <CardHeader className="flex min-h-[52px] flex-row items-start justify-between gap-2 space-y-0 pb-2">
+                            <CardTitle className="min-w-0 whitespace-normal text-sm font-medium leading-snug">Submitted</CardTitle>
+                            <AlertCircle className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold text-blue-600">{statusStats.submitted}</div>
+                            <p className="text-xs text-muted-foreground truncate">{submittedCoachSummary}</p>
+                        </CardContent>
+                    </Card>
+                </Link>
+
+                <Link href={`/dashboard/events/${id}/entries?status=rejected`} className="group block h-full focus:outline-none">
+                    <Card className="h-full cursor-pointer border border-black/10 bg-gradient-to-b from-background/90 to-background/50 shadow-md shadow-black/5 transition-all group-hover:-translate-y-1 group-hover:bg-background/70 group-hover:shadow-lg group-hover:shadow-black/10 dark:border-white/10 dark:shadow-black/40">
+                        <CardHeader className="flex min-h-[52px] flex-row items-start justify-between gap-2 space-y-0 pb-2">
+                            <CardTitle className="min-w-0 whitespace-normal text-sm font-medium leading-snug">Rejected Entries</CardTitle>
+                            <XCircle className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold text-red-600">{statusStats.rejected}</div>
+                            <p className="text-xs text-muted-foreground">Needs changes</p>
+                        </CardContent>
+                    </Card>
+                </Link>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+                {/* Main Stats Area - Discipline & Gender */}
+                <Card className="col-span-4 border border-black/10 bg-gradient-to-b from-background/90 to-background/50 shadow-md shadow-black/5 transition-all hover:-translate-y-0.5 hover:bg-background/70 hover:shadow-lg hover:shadow-black/10 dark:border-white/10 dark:shadow-black/40">
+                    <CardHeader>
+                        <CardTitle>Overview</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="grid grid-cols-2 gap-8">
+                            <div>
+                                <h4 className="text-sm font-semibold mb-4 flex items-center gap-2">
+                                    <Swords className="h-4 w-4" /> Participation
+                                </h4>
+                                <div className="space-y-4">
+                                    <div className="space-y-1">
+                                        <div className="flex items-center justify-between text-sm">
+                                            <span>Both</span>
+                                            <span className="font-medium">{typeStats.both}</span>
+                                        </div>
+                                        <div className="h-2 overflow-hidden rounded-full bg-secondary/70">
+                                            <div className="h-full bg-primary/80" style={{ width: `${totalEntries ? (typeStats.both / totalEntries) * 100 : 0}%` }} />
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <div className="flex items-center justify-between text-sm">
+                                            <span>Kata</span>
+                                            <span className="font-medium">{typeStats.kata}</span>
+                                        </div>
+                                        <div className="h-2 overflow-hidden rounded-full bg-secondary/70">
+                                            <div className="h-full bg-primary/70" style={{ width: `${totalEntries ? (typeStats.kata / totalEntries) * 100 : 0}%` }} />
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <div className="flex items-center justify-between text-sm">
+                                            <span>Kumite</span>
+                                            <span className="font-medium">{typeStats.kumite}</span>
+                                        </div>
+                                        <div className="h-2 overflow-hidden rounded-full bg-secondary/70">
+                                            <div className="h-full bg-primary/60" style={{ width: `${totalEntries ? (typeStats.kumite / totalEntries) * 100 : 0}%` }} />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h4 className="text-sm font-semibold mb-4 flex items-center gap-2">
+                                    <Users className="h-4 w-4" /> Demographics
+                                </h4>
+                                <div className="space-y-4">
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <div className="flex h-8 w-8 items-center justify-center rounded bg-pink-500/15 text-pink-500 font-bold">F</div>
+                                                <span className="text-sm">Female</span>
+                                            </div>
+                                            <span className="font-bold">{genderStats.female}</span>
+                                        </div>
+                                        <div className="h-2 overflow-hidden rounded-full bg-secondary/70">
+                                            <div className="h-full bg-pink-500" style={{ width: `${femalePct}%` }} />
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <div className="flex h-8 w-8 items-center justify-center rounded bg-blue-500/15 text-blue-500 font-bold">M</div>
+                                                <span className="text-sm">Male</span>
+                                            </div>
+                                            <span className="font-bold">{genderStats.male}</span>
+                                        </div>
+                                        <div className="h-2 overflow-hidden rounded-full bg-secondary/70">
+                                            <div className="h-full bg-blue-500" style={{ width: `${malePct}%` }} />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* Top Dojos */}
+                <Card className="col-span-3 border border-black/10 bg-gradient-to-b from-background/90 to-background/50 shadow-md shadow-black/5 transition-all hover:-translate-y-0.5 hover:bg-background/70 hover:shadow-lg hover:shadow-black/10 dark:border-white/10 dark:shadow-black/40">
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                            <Building2 className="h-5 w-5" /> Top Dojos
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="space-y-4">
+                            {topDojos.length > 0 ? topDojos.map(([name, count], i) => (
+                                <div key={name} className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                                            {i + 1}
+                                        </div>
+                                        <div className="font-medium text-sm">{name}</div>
+                                    </div>
+                                    <div className="text-sm font-bold">{count}</div>
+                                </div>
+                            )) : (
+                                <p className="text-sm text-muted-foreground">No data yet.</p>
+                            )}
+                        </div>
+                    </CardContent>
+                </Card>
+
+            </div>
+
+            <div className="flex justify-end pt-4">
+                <Link href={`/dashboard/events/${id}/settings`} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors">
+                    <Settings className="h-3 w-3" /> Event Settings
+                </Link>
+            </div>
+        </div>
+    )
+}
